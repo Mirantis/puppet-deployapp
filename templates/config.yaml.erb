@@ -1,0 +1,6 @@
+### This file is managed by Puppet ###
+---
+puppetmasters:
+<% @puppetmasters.each do |master| %>
+  - <%= master %>
+<% end %>

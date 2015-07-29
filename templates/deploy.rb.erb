@@ -1,0 +1,79 @@
+require 'sinatra'
+require 'sinatra/config_file'
+require 'yaml'
+
+class DeployApp < Sinatra::Base
+
+  #Password protect app
+  use Rack::Auth::Basic, "Restricted Area" do |username, password|
+    username == '<%= @config['deploy_user'] %>' and password == '<%= @config['deploy_pass'] %>'
+  end
+
+  register Sinatra::ConfigFile
+  config_file 'config.yaml'
+
+  @port = settings.port
+  @bind = settings.bind
+  set :bind, @bind
+  set :port, @port
+
+  get '/deploy/environment/:environment' do
+    # Sanitize user input
+    pattern = /^[0-9A-z\.\-\_]+$/
+    unless pattern.match(params[:environment])
+      status 500
+      "Not a valid environment.  Environments should be alphanumeric and only allow these symbols: '.', '-', '_'"
+      exit 1
+    end
+
+    @puppetmasters = settings.puppetmasters
+    @puppetmasters.each do |puppetmaster|
+      cmd = %x(ssh -t #{puppetmaster} "sudo /usr/local/bin/r10k deploy environment #{params[:environment]} -pv")
+      if $?.exitstatus == 0
+        puts "Deploy to #{puppetmaster} complete\n"
+        "Deploy of environment #{params[:environment]} to #{puppetmaster} complete"
+      else
+        status 500
+        "r10k deploy failed with non-zero exit status"
+      end
+    end
+    update_foreman = %x(curl -X POST -k -u "<%= @config['foreman_user'] %>:<%= @config['foreman_pass'] %>" https://<%= @config['foreman_server'] %>/api/smart_proxies/<%= @config['proxy_id'] %>/import_puppetclasses)
+    if $?.exitstatus == 0
+      puts "Import of puppet classes from foreman proxy complete.\n"
+      "Import of puppet classes from foreman proxy complete"
+    else
+      status 500
+      "Could not import puppet classes from foreman proxy"
+    end
+  end
+
+  get '/deploy/module/:module' do
+    # Sanitize user input
+    pattern = /^[0-9A-z\_]+$/
+    unless pattern.match(params[:module])
+      status 500
+      "Not a valid puppet module.  Name incorrect or something else nasty was being attempted."
+      exit 1
+    end
+
+    @puppetmasters = settings.puppetmasters
+    @puppetmasters.each do |puppetmaster|
+      cmd = %x(ssh -t #{puppetmaster} "sudo /usr/local/bin/r10k deploy module #{params[:module]}")
+      if $?.exitstatus == 0
+        puts "Deploy to #{puppetmaster} complete\n"
+        "Deploy of module #{params[:module]} to #{puppetmaster} complete"
+      else
+        status 500
+        "r10k deploy failed with non-zero exit status"
+      end
+    end
+    update_foreman = %x(curl -X POST -k -u "<%= @config['foreman_user'] %>:<%= @config['foreman_pass'] %>" https://<%= @config['foreman_server'] %>/api/smart_proxies/<%= @config['proxy_id'] %>/import_puppetclasses)
+    if $?.exitstatus == 0
+      puts "Import of puppet classes from foreman proxy complete.\n"
+      "Import of puppet classes from foreman proxy complete"
+    else
+      status 500
+      "Could not import puppet classes from foreman proxy"
+    end
+  end
+end
